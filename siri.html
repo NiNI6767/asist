@@ -174,11 +174,17 @@
         </div>
 
         <script>
+            // 1. БЕЗПЕКА: Отримуємо ключ із пам'яті браузера
             let apiKey = localStorage.getItem("gpt_siri_key");
 
-            // Функція оновлення ключа
-            function updateKey() {
-                const key = prompt("Введіть ваш OpenAI API Key:");
+            if (!apiKey) {
+                setupKey();
+            }
+
+            function setupKey() {
+                const key = prompt(
+                    "Введіть свій OpenAI API Key (він збережеться лише локально):",
+                );
                 if (key) {
                     localStorage.setItem("gpt_siri_key", key);
                     apiKey = key;
@@ -186,34 +192,33 @@
                 }
             }
 
-            // Відправка по Enter
-            document
-                .getElementById("userInput")
-                .addEventListener("keypress", (e) => {
-                    if (e.key === "Enter") sendMessage();
-                });
-
-            async function sendMessage() {
-                const input = document.getElementById("userInput");
-                const text = input.value.trim();
-
-                if (!text) return;
-                if (!apiKey) {
-                    updateKey();
-                    return;
+            // 2. ОБРОБКА КЛАВІАТУРИ (Enter для відправки)
+            const inputField = document.getElementById("userInput");
+            inputField.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
                 }
+            });
 
-                addMessage(text, "user");
-                input.value = "";
+            // 3. ГОЛОВНА ФУНКЦІЯ ВІДПРАВКИ
+            async function sendMessage() {
+                const text = inputField.value.trim();
+                if (!text || !apiKey) return;
 
-                // Додаємо анімацію очікування
+                addMessage(text, "user"); // Відображаємо текст користувача
+                inputField.value = "";
+
+                // Додаємо індикатор очікування
+                const chat = document.getElementById("chat");
                 const loadingId = "load-" + Date.now();
                 const loadingDiv = document.createElement("div");
                 loadingDiv.className = "msg ai";
                 loadingDiv.id = loadingId;
                 loadingDiv.innerHTML =
                     '<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
-                document.getElementById("chat").appendChild(loadingDiv);
+                chat.appendChild(loadingDiv);
+                chat.scrollTop = chat.scrollHeight;
 
                 try {
                     const response = await fetch(
@@ -229,8 +234,10 @@
                                 messages: [
                                     {
                                         role: "system",
-                                        content:
-                                            'Ти асистент, що керує iPhone. Якщо користувач хоче увімкнути або вимкнути ліхтарик, обов’язково використай слово "ліхтарик" у відповіді.',
+                                        content: `Ти — системний асистент iOS. Твої правила:
+                                    1. Якщо просять увімкнути ліхтарик, пиши слово "ліхтарик".
+                                    2. Якщо просять подзвонити, пиши: "ТЕЛЕФОНУЮ: [номер]".
+                                    3. Якщо просять відкрити програму, пиши: "ВІДКРИВАЮ: [Name]". Назву програми пиши англійською мовою.`,
                                     },
                                     { role: "user", content: text },
                                 ],
@@ -245,12 +252,34 @@
                         const aiText = data.choices[0].message.content;
                         addMessage(aiText, "ai");
 
-                        // Перевірка на ліхтарик
-                        if (aiText.toLowerCase().includes("ліхтарик")) {
-                            setTimeout(() => {
-                                window.location.href =
-                                    "shortcuts://run-shortcut?name=Torch";
-                            }, 500);
+                        const lowerText = aiText.toLowerCase();
+
+                        // --- ЛОГІКА ТРИГЕРІВ (ШОРТКАТІВ) ---
+
+                        // А) ЛІХТАРИК
+                        if (lowerText.includes("ліхтарик")) {
+                            executeShortcut("Torch");
+                        }
+
+                        // Б) ДЗВІНОК
+                        if (aiText.includes("ТЕЛЕФОНУЮ:")) {
+                            const phoneNumber =
+                                aiText.match(/\+?\d[\d\s-]{7,}\d/g);
+                            if (phoneNumber) {
+                                const cleanNumber = phoneNumber[0].replace(
+                                    /\s/g,
+                                    "",
+                                );
+                                executeShortcut("CallContact", cleanNumber);
+                            }
+                        }
+
+                        // В) ВІДКРИТТЯ ПРОГРАМ
+                        if (aiText.includes("ВІДКРИВАЮ:")) {
+                            const appName = aiText
+                                .split("ВІДКРИВАЮ:")[1]
+                                .trim();
+                            executeShortcut("OpenApp", appName);
                         }
                     } else {
                         addMessage(
@@ -259,11 +288,13 @@
                         );
                     }
                 } catch (e) {
-                    document.getElementById(loadingId).remove();
-                    addMessage("Помилка мережі.", "ai");
+                    if (document.getElementById(loadingId))
+                        document.getElementById(loadingId).remove();
+                    addMessage("Помилка з'єднання з сервером.", "ai");
                 }
             }
 
+            // 4. ДОПОМІЖНІ ФУНКЦІЇ
             function addMessage(text, type) {
                 const chat = document.getElementById("chat");
                 const div = document.createElement("div");
@@ -271,6 +302,14 @@
                 div.textContent = text;
                 chat.appendChild(div);
                 chat.scrollTop = chat.scrollHeight;
+            }
+
+            function executeShortcut(name, input = "") {
+                setTimeout(() => {
+                    let url = `shortcuts://run-shortcut?name=${name}`;
+                    if (input) url += `&input=${encodeURIComponent(input)}`;
+                    window.location.href = url;
+                }, 1000); // Невелика затримка, щоб користувач встиг прочитати відповідь
             }
         </script>
     </body>
